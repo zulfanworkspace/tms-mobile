@@ -1,1 +1,107 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TMS Mobile - Tes Koneksi</title>
+<style>
+  body{font-family:sans-serif;padding:16px;max-width:480px;margin:auto}
+  input,button{width:100%;padding:12px;margin:6px 0;font-size:16px;box-sizing:border-box}
+  button{background:#245B9C;color:#fff;border:0;border-radius:8px}
+  pre{background:#f1f5f9;padding:10px;overflow:auto;font-size:12px;white-space:pre-wrap}
+</style>
+</head>
+<body>
 
+<h3>TMS Mobile: Tes Koneksi</h3>
+
+<input id="u" placeholder="Username">
+<input id="p" type="password" placeholder="Password">
+
+<button onclick="doLogin()">1. Login</button>
+<button onclick="doPull()">2. Unduh Data Offline</button>
+
+<pre id="out">Belum ada aksi.</pre>
+
+<script>
+const API = "https://script.google.com/macros/s/AKfycbxhXu0V7Klf5kTfxqYSCvZvVKtsjeO4hoGrQhQWw5t3ZQkd49grk_LaEjWb2obmsIVD9w/exec";
+let token = localStorage.getItem("tmsToken") || "";
+
+const out = document.getElementById("out");
+
+async function call(fn, args) {
+
+  const res = await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ token: token, fn: fn, args: args || [] })
+  });
+
+  const json = await res.json();
+
+  if (!json.ok) throw new Error(json.error);
+
+  return json.data;
+
+}
+
+async function doLogin() {
+
+  out.textContent = "Login...";
+
+  try {
+
+    const r = await call("loginUser", [
+      document.getElementById("u").value,
+      document.getElementById("p").value
+    ]);
+
+    if (!r.success) throw new Error(r.message);
+
+    token = r.token;
+    localStorage.setItem("tmsToken", token);
+
+    out.textContent = "Login berhasil: " + r.name + " (" + r.role + ")";
+
+  } catch (e) {
+    out.textContent = "GAGAL: " + e.message;
+  }
+
+}
+
+async function doPull() {
+
+  out.textContent = "Mengunduh...";
+
+  const t0 = Date.now();
+
+  try {
+
+    const pkg = await call("getOfflinePackage");
+
+    const unitCount = pkg.units.length;
+
+    let tyreCount = 0;
+    Object.keys(pkg.tyres).forEach(function(u) {
+      tyreCount += pkg.tyres[u].length;
+    });
+
+    out.textContent =
+      "BERHASIL (" + ((Date.now() - t0) / 1000).toFixed(1) + " detik)\n" +
+      "Diunduh : " + pkg.generatedAt + "\n" +
+      "User    : " + pkg.user.nickname + " (" + pkg.user.role + ")\n" +
+      "Unit    : " + unitCount + "\n" +
+      "Ban terpasang : " + tyreCount + "\n" +
+      "Manpower: " + pkg.manpower.length + "\n" +
+      "Ukuran  : " + Math.round(JSON.stringify(pkg).length / 1024) + " KB\n\n" +
+      "Contoh unit pertama:\n" +
+      JSON.stringify(pkg.tyres[pkg.units[0].noLambung], null, 1).slice(0, 600);
+
+  } catch (e) {
+    out.textContent = "GAGAL: " + e.message;
+  }
+
+}
+</script>
+</body>
+</html>
