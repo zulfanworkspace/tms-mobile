@@ -1,7 +1,7 @@
 // Service worker: app shell di-cache agar aplikasi terbuka tanpa sinyal.
 // Naikkan versi ini setiap kali index.html diubah.
-const CACHE = "tyre-monitoring-v1";
-const SHELL = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
+const CACHE = "tyre-monitoring-v2";
+const SHELL = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./logo.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
