@@ -1,14 +1,17 @@
 {
-  "name": "TMS Mobile - Tyre Monitoring",
-  "short_name": "TMS Mobile",
+  "name": "Tyre Monitoring",
+  "short_name": "Tyre Monitor",
+  "description": "Input monitoring ban harian, bisa offline dan otomatis terupload saat online.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f4f7fb",
-  "theme_color": "#245B9C",
+  "background_color": "#245B9C",
+  "theme_color": "#1d4b80",
+  "lang": "id",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
