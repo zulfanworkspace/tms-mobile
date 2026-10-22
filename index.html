@@ -208,7 +208,7 @@ input[readonly]{background:#f1f5f9;color:#475569}
       </button>
     </div>
     <button class="btn" id="bLogin" onclick="doLogin()">Masuk</button>
-    <p class="note">Login pertama wajib online. Setelah itu aplikasi bisa dibuka dan dipakai tanpa sinyal.</p>
+    <p class="note">Login pertama wajib online. Setelah itu aplikasi bisa dibuka dan dipakai tanpa sinyal, dan tidak akan logout otomatis sampai kamu menekan Keluar.</p>
   </div>
 </section>
 
@@ -297,6 +297,11 @@ input[readonly]{background:#f1f5f9;color:#475569}
 
   <div id="unitHead" class="card hide"></div>
   <div id="tyres"></div>
+
+  <div class="card hide" id="cHist">
+    <h2>Unit Sudah Diinput</h2>
+    <div id="hist"></div>
+  </div>
 </section>
 
 </main>
@@ -308,7 +313,7 @@ input[readonly]{background:#f1f5f9;color:#475569}
     <button class="btn danger sm" onclick="cancelUnit()">Batal</button>
     <button class="btn" onclick="saveUnit()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      Simpan &amp; Unit Berikutnya
+      <span id="saveTxt">Simpan &amp; Unit Berikutnya</span>
     </button>
   </div>
 </div>
@@ -321,7 +326,7 @@ input[readonly]{background:#f1f5f9;color:#475569}
 
 <script>
 const API = "https://script.google.com/macros/s/AKfycbxhXu0V7Klf5kTfxqYSCvZvVKtsjeO4hoGrQhQWw5t3ZQkd49grk_LaEjWb2obmsIVD9w/exec";
-const S = { token:"", user:null, pkg:null, session:null, unit:null, running:false, view:"", shift:"", mp:new Set() };
+const S = { token:"", user:null, pkg:null, session:null, unit:null, edit:null, running:false, view:"", shift:"", mp:new Set() };
 
 /* ============ penyimpanan lokal (IndexedDB) ============ */
 function db(){
@@ -444,8 +449,9 @@ async function logout(){
   const q=(await qAll()).length;
   if(q&&!confirm(q+" data belum terupload dan akan hilang. Tetap keluar?"))return;
   for(const x of await qAll())await qDel(x.id);
+  if(navigator.onLine){try{await call("logoutUser");}catch(e){}}
   await kvDel("token");await kvDel("user");await kvDel("pkg");await kvDel("session");
-  Object.assign(S,{token:"",user:null,pkg:null,session:null,unit:null});
+  Object.assign(S,{token:"",user:null,pkg:null,session:null,unit:null,edit:null});
   show("sLogin");
 }
 
@@ -472,6 +478,7 @@ async function renderHome(){
 }
 
 async function renderQueue(){
+  if(S.view==="sUnit")renderHist();
   const all=await qAll();
   const failed=all.filter(x=>x.status==="FAILED").length;
   $("stQ").textContent=all.length;$("stF").textContent=failed;
@@ -525,7 +532,7 @@ async function startSession(){
   if(!date)return toast("Pilih tanggal.","bad");
   if(!S.shift)return toast("Pilih shift.","bad");
   if(S.mp.size===0)return toast("Pilih minimal satu manpower.","bad");
-  S.session={date,shift:S.shift,manpower:[...S.mp].join(", "),saved:0,units:[]};
+  S.session={date,shift:S.shift,manpower:[...S.mp].join(", "),saved:0,units:[],history:[]};
   await kvSet("session",S.session);
   enterUnit();
 }
@@ -533,6 +540,7 @@ function enterUnit(){
   cancelUnit(true);
   show("sUnit");
   renderSessBar();
+  renderHist();
   $("uu").focus();
 }
 function renderSessBar(){
@@ -564,46 +572,68 @@ function suggestUnit(k){
 }
 function pickUnit(n){$("uu").value=n;$("usug").classList.add("hide");$("uh").focus();}
 
+function hmNow(){
+  const e=$("uhe");
+  return S.edit&&e?e.value:$("uh").value;
+}
+
 function loadTyres(){
   const unit=$("uu").value.trim();
   const hm=Number($("uh").value);
   const um=S.pkg.units.find(u=>u.noLambung===unit);
   if(!um)return toast("Pilih unit dari daftar.","bad");
   if(!$("uh").value||isNaN(hm))return toast("Isi HM Unit.","bad");
-  if(S.session.units&&S.session.units.includes(unit)&&!confirm(unit+" sudah dimonitor di sesi ini. Input lagi?"))return;
+  if((S.session.history||[]).some(h=>h.unit===unit))
+    return toast(unit+" sudah diinput di sesi ini. Gunakan tombol Edit di daftar bawah.","bad");
   const list=S.pkg.tyres[unit]||[];
   if(!list.length)return toast("Tidak ada ban terpasang di unit ini.","bad");
-  S.unit=unit;
+  S.edit=null;S.unit=unit;
+  const rows=list.map(t=>({
+    position:t.position,serialNumber:t.serialNumber,
+    brand:t.brand||"",pattern:t.pattern||"",
+    ihu:t.installHmUnit,iht:t.installHmTyre
+  }));
+  buildTyres(rows,hm,um.modelUnit||um.kodeUnit||"");
+}
+
+function buildTyres(rows,hm,sub){
+  const edit=!!S.edit;
   $("cUnitPick").classList.add("hide");
   const uh=$("unitHead");uh.classList.remove("hide");
-  uh.innerHTML=`<div class="unitbadge"><div><b>${esc(unit)}</b><small>${esc(um.modelUnit||um.kodeUnit||"")} · ${list.length} ban</small></div>
-    <div style="text-align:right"><small>HM UNIT</small><b style="font-size:18px">${hm.toLocaleString("id-ID")}</b></div></div>`;
-  $("tyres").innerHTML=list.map((t,i)=>`
-    <div class="card pos ${i===0?"open":""}" data-pos="${t.position}" data-sn="${esc(t.serialNumber)}" data-ihu="${t.installHmUnit}" data-iht="${t.installHmTyre}">
+  uh.innerHTML=`<div class="unitbadge"><div><b>${esc(S.unit)}</b><small>${edit?"Mode edit · ":""}${esc(sub)} · ${rows.length} ban</small></div>`+
+    (edit
+      ?`<div style="width:150px"><small>HM UNIT</small><input id="uhe" type="number" inputmode="numeric" value="${esc(hm)}" oninput="recalc()" style="height:42px;margin-top:4px"></div>`
+      :`<div style="text-align:right"><small>HM UNIT</small><b style="font-size:18px;display:block">${Number(hm).toLocaleString("id-ID")}</b></div>`)+
+    `</div>`;
+  $("tyres").innerHTML=rows.map((r,i)=>{
+    const v=k=>esc(r[k]);
+    const done=["pressureActual","temperatureTyre","treadL"].some(k=>r[k]!==undefined&&r[k]!=="");
+    return `
+    <div class="card pos ${i===0?"open":""} ${done?"done":""}" data-pos="${esc(r.position)}" data-sn="${esc(r.serialNumber)}" data-brand="${esc(r.brand)}" data-pattern="${esc(r.pattern)}" data-ihu="${esc(r.ihu)}" data-iht="${esc(r.iht)}">
       <button type="button" class="pos-h" onclick="togglePos(this)">
-        <div class="pos-n">P${t.position}</div>
-        <div class="pos-t"><b>${esc(t.serialNumber)}</b><span>${esc(t.brand||"-")} ${esc(t.pattern||"")}</span></div>
+        <div class="pos-n">P${esc(r.position)}</div>
+        <div class="pos-t"><b>${esc(r.serialNumber)}</b><span>${esc(r.brand||"-")} ${esc(r.pattern||"")}</span></div>
         <div class="pos-hm"><b class="hm-txt">-</b><span>HM TYRE</span></div>
         ${ICON.chev}
       </button>
       <div class="pos-b">
         <div class="sub">TEKANAN (PSI)</div>
         <div class="g2">
-          <div><label>Aktual</label><input class="f-pa" type="number" inputmode="decimal" oninput="markDone(this)"></div>
-          <div><label>Tambah</label><input class="f-pd" type="number" inputmode="decimal"></div>
+          <div><label>Aktual</label><input class="f-pa" type="number" inputmode="decimal" value="${v("pressureActual")}" oninput="markDone(this)"></div>
+          <div><label>Tambah</label><input class="f-pd" type="number" inputmode="decimal" value="${v("pressureAdd")}"></div>
         </div>
         <div class="sub">TEMPERATUR (°C)</div>
         <div class="g3">
-          <div><label>Ban</label><input class="f-tt" type="number" inputmode="decimal" oninput="markDone(this)"></div>
-          <div><label>Rim</label><input class="f-tr" type="number" inputmode="decimal"></div>
-          <div><label>Rem</label><input class="f-tb" type="number" inputmode="decimal"></div>
+          <div><label>Ban</label><input class="f-tt" type="number" inputmode="decimal" value="${v("temperatureTyre")}" oninput="markDone(this)"></div>
+          <div><label>Rim</label><input class="f-tr" type="number" inputmode="decimal" value="${v("temperatureRim")}"></div>
+          <div><label>Rem</label><input class="f-tb" type="number" inputmode="decimal" value="${v("temperatureBrake")}"></div>
         </div>
         <div class="sub">TREAD (MM)</div>
         <div class="g2">
-          <div><label>Kiri (L)</label><input class="f-tl" type="number" inputmode="decimal" oninput="markDone(this)"></div>
-          <div><label>Kanan (R)</label><input class="f-tx" type="number" inputmode="decimal"></div>
+          <div><label>Kiri (L)</label><input class="f-tl" type="number" inputmode="decimal" value="${v("treadL")}" oninput="markDone(this)"></div>
+          <div><label>Kanan (R)</label><input class="f-tx" type="number" inputmode="decimal" value="${v("treadR")}"></div>
         </div>
-        <label>Remark</label><input class="f-rm" type="text" placeholder="Catatan (opsional)">
+        <label>Remark</label><input class="f-rm" type="text" placeholder="Catatan (opsional)" value="${v("remark")}">
         <label>Foto</label>
         <div class="photo">
           <label class="pick" style="margin:0;text-transform:none;letter-spacing:0">${ICON.cam} Ambil / pilih foto
@@ -611,12 +641,16 @@ function loadTyres(){
           </label>
           <img class="hide" alt="">
         </div>
+        ${r.hasPhoto?'<p class="note">Foto sudah ada. Pilih foto baru hanya jika ingin mengganti.</p>':""}
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   $("sAct").classList.add("hide");$("uAct").classList.remove("hide");
-  recalc();updateProg();
+  $("saveTxt").textContent=edit?"Simpan Perubahan":"Simpan & Unit Berikutnya";
+  renderHist();recalc();updateProg();
   window.scrollTo({top:0,behavior:"smooth"});
 }
+
 function togglePos(btn){btn.parentElement.classList.toggle("open");}
 function markDone(inp){
   const c=inp.closest(".pos");
@@ -636,7 +670,8 @@ function previewPhoto(inp){
   img.src=URL.createObjectURL(f);img.classList.remove("hide");
 }
 function recalc(){
-  const hm=Number($("uh").value);
+  const raw=hmNow();
+  const hm=raw===""?NaN:Number(raw);
   document.querySelectorAll("#tyres .pos").forEach(c=>{
     const ihu=c.dataset.ihu,iht=Number(c.dataset.iht);
     const v=(ihu===""||isNaN(hm)||isNaN(iht))?"":Math.max(0,iht+(hm-Number(ihu)));
@@ -645,12 +680,13 @@ function recalc(){
   });
 }
 function cancelUnit(silent){
-  S.unit=null;
+  S.unit=null;S.edit=null;
   $("tyres").innerHTML="";$("unitHead").classList.add("hide");
   $("cUnitPick").classList.remove("hide");
   $("uu").value="";$("uh").value="";$("usug").classList.add("hide");
   $("uAct").classList.add("hide");
   if(S.view==="sUnit")$("sAct").classList.remove("hide");
+  renderHist();
   if(!silent)window.scrollTo({top:0,behavior:"smooth"});
 }
 
@@ -674,41 +710,174 @@ function compress(file,max=1280,q=0.7){
   });
 }
 
+const FIELDS=["hmTyre","pressureActual","pressureAdd","temperatureTyre","temperatureRim","temperatureBrake","treadL","treadR","remark"];
+
 async function saveUnit(){
   if(!S.unit)return;
-  const s=S.session,hm=Number($("uh").value);
-  const num=v=>v===""?"":Number(v);
-  const data=[];
+  const s=S.session;
+  const raw=hmNow(),hm=Number(raw);
+  if(raw===""||isNaN(hm))return toast("Isi HM Unit.","bad");
   const btn=document.querySelector("#uAct .btn:not(.sm)");btn.disabled=true;
 
-  for(const c of document.querySelectorAll("#tyres .pos")){
-    const g=k=>c.querySelector(k).value;
-    const item={
-      date:s.date,unit:S.unit,hmUnit:hm,
-      serialNumber:c.dataset.sn,position:c.dataset.pos,time:s.shift,
-      hmTyre:c.dataset.hm===""?"":Number(c.dataset.hm),
-      pressureActual:num(g(".f-pa")),pressureAdd:num(g(".f-pd")),
-      temperatureTyre:num(g(".f-tt")),temperatureRim:num(g(".f-tr")),temperatureBrake:num(g(".f-tb")),
-      treadL:num(g(".f-tl")),treadR:num(g(".f-tx")),
-      remark:g(".f-rm"),manpower:s.manpower
-    };
-    const f=c.querySelector(".f-ph").files[0];
-    if(f){
-      try{
-        item.photoData=await compress(f);
-        item.photoName=item.serialNumber+"_"+s.date+"_"+Date.now()+"_"+item.position+".jpg";
-      }catch(e){btn.disabled=false;return toast(e.message,"bad");}
-    }
-    data.push(item);
-  }
+  try{
+    const num=v=>v===""?"":Number(v);
+    const rows=[];
 
-  await qPut({unit:S.unit,date:s.date,shift:s.shift,status:"PENDING",error:"",data});
-  s.saved++;s.units=(s.units||[]).concat(S.unit);
-  await kvSet("session",s);
-  btn.disabled=false;
-  toast(S.unit+" tersimpan di perangkat ✓","ok");
-  enterUnit();
-  runQueue();
+    document.querySelectorAll("#tyres .pos").forEach(c=>{
+      const g=k=>c.querySelector(k).value;
+      rows.push({
+        position:c.dataset.pos,serialNumber:c.dataset.sn,
+        brand:c.dataset.brand,pattern:c.dataset.pattern,
+        ihu:c.dataset.ihu,iht:c.dataset.iht,
+        hmTyre:c.dataset.hm===""?"":Number(c.dataset.hm),
+        pressureActual:num(g(".f-pa")),pressureAdd:num(g(".f-pd")),
+        temperatureTyre:num(g(".f-tt")),temperatureRim:num(g(".f-tr")),temperatureBrake:num(g(".f-tb")),
+        treadL:num(g(".f-tl")),treadR:num(g(".f-tx")),
+        remark:g(".f-rm"),
+        file:c.querySelector(".f-ph").files[0]||null
+      });
+    });
+
+    const edit=S.edit?(s.history||[]).find(h=>h.id===S.edit):null;
+    const qs=await qAll();
+    const q=edit?qs.find(x=>x.hid===edit.id):null;
+
+    if(q&&q.status==="SENDING")
+      return toast("Data unit ini sedang dikirim, coba lagi sebentar.","bad");
+
+    // Foto: pakai foto baru; kalau tidak ada, pertahankan foto yang masih di antrian
+    const photos={};
+    if(q)q.data.forEach(d=>{if(d.photoData)photos[d.position]={photoData:d.photoData,photoName:d.photoName};});
+
+    for(const r of rows){
+      if(!r.file)continue;
+      try{
+        photos[r.position]={
+          photoData:await compress(r.file),
+          photoName:r.serialNumber+"_"+s.date+"_"+Date.now()+"_"+r.position+".jpg"
+        };
+      }catch(e){return toast(e.message,"bad");}
+    }
+
+    // Salinan nilai terbaru (disimpan untuk edit berikutnya)
+    const snapshot=rows.map(r=>{
+      const o={...r};delete o.file;
+      const old=edit&&edit.rows.find(x=>x.position===r.position);
+      o.hasPhoto=!!photos[r.position]||!!(old&&old.hasPhoto);
+      return o;
+    });
+
+    const base={date:s.date,unit:S.unit,time:s.shift};
+    const sv=edit&&edit.server;
+    let data=[];
+
+    if(sv){
+
+      // Data sudah ada di server: kirim HANYA yang berubah
+      const hmChanged=String(sv.hmUnit)!==String(hm);
+
+      rows.forEach(r=>{
+        const o=sv.rows.find(x=>x.position===r.position);
+        const it={...base,serialNumber:r.serialNumber,position:r.position};
+        let changed=false;
+        if(hmChanged||!o){it.hmUnit=hm;changed=true;}
+        FIELDS.forEach(f=>{
+          if(!o||String(o[f])!==String(r[f])){it[f]=r[f];changed=true;}
+        });
+        const p=photos[r.position];
+        if(p){Object.assign(it,p);changed=true;}
+        if(changed)data.push(it);
+      });
+
+      if(data.length===0){
+        if(q)await qDel(q.id);
+        toast("Tidak ada perubahan.");
+        enterUnit();
+        return;
+      }
+
+    }else{
+
+      // Belum pernah terkirim: kirim lengkap
+      data=rows.map(r=>{
+        const it={...base,hmUnit:hm,serialNumber:r.serialNumber,position:r.position,manpower:s.manpower};
+        FIELDS.forEach(f=>{it[f]=r[f];});
+        return Object.assign(it,photos[r.position]||{});
+      });
+
+    }
+
+    const item={
+      unit:S.unit,date:s.date,shift:s.shift,
+      status:"PENDING",error:"",data,
+      snapshot:{hmUnit:hm,rows:snapshot}
+    };
+
+    let hid;
+
+    if(edit){
+      hid=edit.id;edit.hmUnit=hm;edit.rows=snapshot;
+      if(q)item.id=q.id;      // ganti isi antrian yang lama
+    }else{
+      hid="h"+Date.now();
+      s.history=(s.history||[]).concat({id:hid,unit:S.unit,hmUnit:hm,rows:snapshot,server:null});
+      s.saved++;s.units=(s.units||[]).concat(S.unit);
+    }
+
+    item.hid=hid;
+
+    await qPut(item);
+    await kvSet("session",s);
+
+    toast(S.unit+(edit?" diperbarui ✓":" tersimpan di perangkat ✓"),"ok");
+    enterUnit();
+    runQueue();
+
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+/* ---- daftar unit yang sudah diinput ---- */
+const ICON_OK='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+async function renderHist(){
+  const card=$("cHist");
+  if(!card)return;
+  const s=S.session;
+  const list=s&&s.history?s.history:[];
+  if(S.view!=="sUnit"||S.unit||!list.length){card.classList.add("hide");return;}
+  const qs=await qAll();
+  if(S.unit)return;
+  card.classList.remove("hide");
+  $("hist").innerHTML=list.slice().reverse().map(h=>{
+    const q=qs.find(x=>x.hid===h.id);
+    const st=q?q.status:"SENT";
+    const label={PENDING:"Menunggu",SENDING:"Mengirim",FAILED:"Gagal",SENT:"Terupload"}[st];
+    const icon=st==="SENDING"?ICON.sync:st==="FAILED"?ICON.warn:st==="SENT"?ICON_OK:ICON.cloud;
+    return `
+      <div class="q">
+        <div class="dot ${st}">${icon}</div>
+        <div class="info"><b>${esc(h.unit)}</b>
+          <span>HM Unit ${Number(h.hmUnit).toLocaleString("id-ID")} · ${h.rows.length} ban</span>
+          ${q&&q.error?`<span class="err">${esc(q.error)}</span>`:""}</div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <span class="badge ${st}">${label}</span>
+          <button class="btn sm sec" onclick="editEntry('${esc(h.id)}')">Edit</button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+async function editEntry(id){
+  const s=S.session;
+  const h=s&&(s.history||[]).find(x=>x.id===id);
+  if(!h)return;
+  const q=(await qAll()).find(x=>x.hid===id);
+  if(q&&q.status==="SENDING")return toast("Sedang dikirim, tunggu sebentar.","bad");
+  S.edit=id;S.unit=h.unit;
+  const um=S.pkg.units.find(u=>u.noLambung===h.unit)||{};
+  buildTyres(h.rows,h.hmUnit,um.modelUnit||um.kodeUnit||"");
 }
 
 /* ============ upload antrian ============ */
@@ -724,6 +893,7 @@ async function runQueue(manual){
       x.status="SENDING";await qPut(x);renderQueue();
       try{
         const r=await call("saveMonitoringData",[x.data]);
+        await markSent(x);
         await qDel(x.id);
         toast(r&&r.pendingApproval?x.unit+" terkirim, menunggu approval Staff.":x.unit+" terupload ✓","ok");
       }catch(e){
@@ -737,6 +907,15 @@ async function runQueue(manual){
       renderQueue();
     }
   }finally{S.running=false;renderQueue();}
+}
+
+async function markSent(x){
+  const s=S.session;
+  if(!s||!x.hid)return;
+  const h=(s.history||[]).find(i=>i.id===x.hid);
+  if(!h)return;
+  h.server=x.snapshot;      // acuan "data yang ada di server"
+  await kvSet("session",s);
 }
 
 /* ============ install PWA ============ */
@@ -762,6 +941,7 @@ setInterval(()=>{if(navigator.onLine)runQueue();},60000);
   S.user=await kvGet("user");
   S.pkg=await kvGet("pkg");
   S.session=await kvGet("session");
+  if(S.session&&!S.session.history)S.session.history=[];
   if(S.user&&S.pkg){show("sHome");runQueue();}
   else show("sLogin");
 })();
