@@ -636,7 +636,10 @@ function buildTyres(rows,hm,sub){
         <label>Remark</label><input class="f-rm" type="text" placeholder="Catatan (opsional)" value="${v("remark")}">
         <label>Foto</label>
         <div class="photo">
-          <label class="pick" style="margin:0;text-transform:none;letter-spacing:0">${ICON.cam} Ambil / pilih foto
+          <label class="pick" style="margin:0;text-transform:none;letter-spacing:0">${ICON.cam} Kamera
+            <input class="f-cam" type="file" accept="image/*" capture="environment" onchange="previewPhoto(this)">
+          </label>
+          <label class="pick" style="margin:0;text-transform:none;letter-spacing:0">Galeri
             <input class="f-ph" type="file" accept="image/*" onchange="previewPhoto(this)">
           </label>
           <img class="hide" alt="">
@@ -664,7 +667,10 @@ function updateProg(){
   $("progBar").style.width=(d/all.length*100)+"%";
 }
 function previewPhoto(inp){
-  const img=inp.closest(".photo").querySelector("img");
+  const box=inp.closest(".photo");
+  const img=box.querySelector("img");
+  // hanya satu foto per ban: kosongkan input satunya
+  box.querySelectorAll("input[type=file]").forEach(i=>{if(i!==inp)i.value="";});
   const f=inp.files[0];
   if(!f){img.classList.add("hide");return;}
   img.src=URL.createObjectURL(f);img.classList.remove("hide");
@@ -674,7 +680,11 @@ function recalc(){
   const hm=raw===""?NaN:Number(raw);
   document.querySelectorAll("#tyres .pos").forEach(c=>{
     const ihu=c.dataset.ihu,iht=Number(c.dataset.iht);
-    const v=(ihu===""||isNaN(hm)||isNaN(iht))?"":Math.max(0,iht+(hm-Number(ihu)));
+    let v="";
+    if(!isNaN(hm)){
+      // Ban tanpa data pemasangan (mis. UNKNOWN): HM Tyre disamakan dengan HM Unit
+      v=(ihu===""||isNaN(Number(ihu))||isNaN(iht))?hm:Math.max(0,iht+(hm-Number(ihu)));
+    }
     c.dataset.hm=v;
     c.querySelector(".hm-txt").textContent=v===""?"-":Number(v).toLocaleString("id-ID");
   });
@@ -734,7 +744,7 @@ async function saveUnit(){
         temperatureTyre:num(g(".f-tt")),temperatureRim:num(g(".f-tr")),temperatureBrake:num(g(".f-tb")),
         treadL:num(g(".f-tl")),treadR:num(g(".f-tx")),
         remark:g(".f-rm"),
-        file:c.querySelector(".f-ph").files[0]||null
+        file:c.querySelector(".f-cam").files[0]||c.querySelector(".f-ph").files[0]||null
       });
     });
 
