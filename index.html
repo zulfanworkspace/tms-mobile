@@ -448,10 +448,21 @@ function needLogin(msg){
 async function logout(){
   const q=(await qAll()).length;
   if(q&&!confirm(q+" data belum terupload dan akan hilang. Tetap keluar?"))return;
-  for(const x of await qAll())await qDel(x.id);
-  if(navigator.onLine){try{await call("logoutUser");}catch(e){}}
-  await kvDel("token");await kvDel("user");await kvDel("pkg");await kvDel("session");
-  Object.assign(S,{token:"",user:null,pkg:null,session:null,unit:null,edit:null});
+  // Hapus sesi di server di latar belakang (tidak ditunggu, supaya tombol Keluar selalu langsung bekerja)
+  const tk=S.token;
+  S.token="";
+  if(navigator.onLine&&tk){
+    try{
+      fetch(API,{method:"POST",keepalive:true,headers:{"Content-Type":"text/plain;charset=utf-8"},
+        body:JSON.stringify({token:tk,fn:"logoutUser",args:[]})}).catch(()=>{});
+    }catch(e){}
+  }
+  try{
+    for(const x of await qAll())await qDel(x.id);
+    await kvDel("token");await kvDel("user");await kvDel("pkg");await kvDel("session");
+  }catch(e){}
+  Object.assign(S,{token:"",user:null,pkg:null,session:null,unit:null,edit:null,running:false});
+  closeModal();
   show("sLogin");
 }
 
@@ -907,6 +918,7 @@ async function runQueue(manual){
         await qDel(x.id);
         toast(r&&r.pendingApproval?x.unit+" terkirim, menunggu approval Staff.":x.unit+" terupload ✓","ok");
       }catch(e){
+        if(!S.token)break;   // sudah logout: jangan kembalikan data ke antrian
         if(isAuthErr(e)||e instanceof TypeError||/failed to fetch|network|load failed|json/i.test(e.message||"")){
           x.status="PENDING";
           x.error=isAuthErr(e)?"":"Gagal terhubung ke server ("+(e.message||"jaringan")+"). Akan dicoba lagi otomatis.";
