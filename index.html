@@ -768,7 +768,10 @@ async function saveUnit(){
 
     // Foto: pakai foto baru; kalau tidak ada, pertahankan foto yang masih di antrian
     const photos={};
-    if(q)q.data.forEach(d=>{if(d.photoData)photos[d.position]={photoData:d.photoData,photoName:d.photoName};});
+    if(q)q.data.forEach(d=>{
+      if(d.photoData)photos[d.position]={photoData:d.photoData,photoName:d.photoName};
+      else if(d.photoUrl)photos[d.position]={photoUrl:d.photoUrl};
+    });
 
     for(const r of rows){
       if(!r.file)continue;
@@ -913,6 +916,14 @@ async function runQueue(manual){
       if(!x)break;
       x.status="SENDING";await qPut(x);renderQueue();
       try{
+        // Upload foto satu per satu dulu (request kecil), lalu kirim data hanya dengan link fotonya
+        for(const it of x.data){
+          if(it.photoData){
+            it.photoUrl=await call("uploadMonitoringPhoto",[it.photoData,it.photoName]);
+            delete it.photoData;delete it.photoName;
+            await qPut(x);   // simpan progres: foto yang sudah naik tidak diulang
+          }
+        }
         const r=await call("saveMonitoringData",[x.data]);
         await markSent(x);
         await qDel(x.id);
